@@ -1,0 +1,1428 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SRA Verify Comparison Dashboard</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: "Amazon Ember", "Helvetica Neue", Roboto, Arial, sans-serif;
+            background-color: #f5f5f5;
+            min-height: 100vh;
+            padding: 20px;
+            color: rgb(15, 20, 26);
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #232526 0%, #414345 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+
+        .header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .file-selector {
+            padding: 30px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #eee;
+        }
+
+        .file-input {
+            position: absolute;
+            opacity: 0;
+            width: 100%;
+            height: 100%;
+            cursor: pointer;
+        }
+
+        .file-input-label {
+            display: inline-block;
+            padding: 12px 20px;
+            background: #667eea;
+            color: white;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.3s ease;
+        }
+
+        .file-input-label:hover {
+            background: #5a6fd8;
+        }
+
+        .file-input-label.loaded {
+            background: #28a745;
+        }
+
+        .load-btn {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background 0.3s ease;
+        }
+
+        .load-btn:hover {
+            background: #218838;
+        }
+
+        .load-btn:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+
+        .dashboard-content {
+            display: none;
+        }
+
+        .dashboard-content.active {
+            display: block;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            padding: 30px;
+            background: #f8f9fa;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 25px;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
+            transition: transform 0.3s ease;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .stat-number {
+            font-size: 2.5em;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        .stat-sub {
+            font-size: 0.85em;
+            color: #888;
+            margin-top: 5px;
+        }
+
+        .stat-label {
+            color: #666;
+            font-size: 0.9em;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .resolved {
+            color: #28a745;
+        }
+
+        .new-finding {
+            color: #dc3545;
+        }
+
+        .persistent {
+            color: #ffc107;
+        }
+
+        .pass {
+            color: #28a745;
+        }
+
+        .fail {
+            color: #dc3545;
+        }
+
+        .high {
+            color: #dc3545;
+        }
+
+        .medium {
+            color: #ffc107;
+        }
+
+        .low {
+            color: #17a2b8;
+        }
+
+        .section {
+            margin: 30px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
+            overflow: hidden;
+        }
+
+        .section-header {
+            background: #f8f9fa;
+            padding: 20px;
+            border-bottom: 1px solid #dee2e6;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .section-title {
+            font-size: 1.3em;
+            font-weight: 600;
+            color: #333;
+            display: flex;
+            align-items: center;
+        }
+
+        .section-content {
+            padding: 30px;
+        }
+
+        .progress-banner {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 10px;
+            text-align: center;
+            margin-bottom: 0;
+        }
+
+        .progress-banner h2 {
+            font-size: 2em;
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+
+        .progress-banner .big-number {
+            font-size: 3.5em;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+
+        .progress-banner p {
+            font-size: 1.1em;
+            opacity: 0.95;
+        }
+
+        .progress-bar-container {
+            max-width: 600px;
+            margin: 20px auto 0;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 20px;
+            overflow: hidden;
+            height: 30px;
+            position: relative;
+        }
+
+        .progress-bar-fill {
+            background: white;
+            height: 100%;
+            border-radius: 20px;
+            transition: width 1s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #28a745;
+            font-weight: bold;
+        }
+
+        .comparison-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            padding: 30px;
+            background: #f8f9fa;
+        }
+
+        .comparison-card {
+            background: white;
+            padding: 25px;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
+        }
+
+        .comparison-card h3 {
+            font-size: 1.1em;
+            color: #666;
+            margin-bottom: 15px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .comparison-numbers {
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            margin: 15px 0;
+        }
+
+        .comparison-number {
+            text-align: center;
+        }
+
+        .comparison-number .value {
+            font-size: 2.5em;
+            font-weight: bold;
+        }
+
+        .comparison-number .label {
+            color: #666;
+            font-size: 0.85em;
+            text-transform: uppercase;
+        }
+
+        .comparison-arrow {
+            font-size: 2em;
+            color: #999;
+        }
+
+        .controls {
+            padding: 30px;
+            background: white;
+            border-bottom: 1px solid #eee;
+        }
+
+        .filter-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .filter-group label {
+            font-weight: 600;
+            color: #333;
+        }
+
+        select,
+        input {
+            padding: 10px 15px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s ease;
+        }
+
+        select:focus,
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .search-box {
+            flex: 1;
+            min-width: 250px;
+        }
+
+        .tabs {
+            display: flex;
+            border-bottom: 2px solid #e9ecef;
+            margin-bottom: 20px;
+            gap: 5px;
+            flex-wrap: wrap;
+        }
+
+        .tab {
+            padding: 12px 24px;
+            cursor: pointer;
+            border: none;
+            background: transparent;
+            font-size: 14px;
+            font-weight: 600;
+            color: #666;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s ease;
+            margin-bottom: -2px;
+        }
+
+        .tab:hover {
+            color: #333;
+            background: #f8f9fa;
+        }
+
+        .tab.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+
+        .tab .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            margin-left: 8px;
+            font-weight: 700;
+        }
+
+        .tab .badge.resolved {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .tab .badge.new-finding {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .tab .badge.persistent {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .tab .badge.fixed-also {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+
+        .export-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .export-btn:hover {
+            background: #5a6fd8;
+        }
+
+        .results-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
+        }
+
+        .results-table th {
+            background: #f8f9fa;
+            padding: 15px 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #333;
+            border-bottom: 2px solid #dee2e6;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+
+        .results-table th:hover {
+            background: #e9ecef;
+        }
+
+        .results-table td {
+            padding: 15px 12px;
+            border-bottom: 1px solid #dee2e6;
+            vertical-align: top;
+            word-wrap: break-word;
+            word-break: break-word;
+            white-space: normal;
+            max-width: 300px;
+        }
+
+        .results-table tr:hover {
+            background: #f8f9fa;
+        }
+
+        .status-badge,
+        .severity-badge,
+        .change-badge {
+            padding: 4px 8px;
+            border-radius: 15px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            white-space: nowrap;
+        }
+
+        .status-pass {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-fail {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .severity-high {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .severity-medium {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .severity-low {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+
+        .change-resolved {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .change-new {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .change-persistent {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .change-unchanged-pass {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+
+        .expandable-cell {
+            max-width: 300px;
+            cursor: pointer;
+            word-wrap: break-word;
+            word-break: break-word;
+            white-space: normal;
+        }
+
+        .expandable-cell:hover {
+            background: #f0f0f0;
+        }
+
+        .tooltip {
+            position: absolute;
+            background: #333;
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            max-width: 400px;
+            z-index: 1000;
+            display: none;
+            word-wrap: break-word;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 50px;
+            font-size: 1.2em;
+            color: #666;
+        }
+
+        .error {
+            text-align: center;
+            padding: 50px;
+            color: #dc3545;
+            font-size: 1.1em;
+        }
+
+        .no-results {
+            text-align: center;
+            padding: 50px;
+            color: #666;
+            font-size: 1.1em;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .instructions {
+            background: #e3f2fd;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .instructions h3 {
+            color: #1976d2;
+            margin-bottom: 10px;
+        }
+
+        .file-slot {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            border: 2px solid #e9ecef;
+            transition: border-color 0.3s ease;
+        }
+
+        .file-slot.loaded {
+            border-color: #28a745;
+            background: #f0fdf4;
+        }
+
+        .file-slot h4 {
+            color: #333;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .file-slot .file-name {
+            color: #666;
+            font-size: 13px;
+            margin-top: 8px;
+            font-style: italic;
+        }
+
+        .file-slot .file-stats {
+            color: #28a745;
+            font-size: 13px;
+            margin-top: 8px;
+            font-weight: 600;
+        }
+
+        @media (max-width: 768px) {
+            .filter-group {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .comparison-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .results-table {
+                font-size: 14px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <div
+                style="display: flex; justify-content: space-between; align-items: center; max-width: 1600px; margin: 0 auto;">
+                <div style="text-align: left;">
+                    <h1 style="font-size: 2.5em; font-weight: 400; margin: 0;">SRA Verify comparison dashboard</h1>
+                    <p style="margin-top: 8px; opacity: 0.85;">Track security improvements between two SRA Verify scans
+                    </p>
+                </div>
+                <a href="https://github.com/awslabs/sra-verify/tree/main" target="_blank"
+                    style="color: white; text-decoration: none; padding: 10px 20px; border: 2px solid white; border-radius: 8px; transition: all 0.3s ease; display: flex; align-items: center; gap: 8px;">
+                    <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24">
+                        <path
+                            d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+                    </svg>
+                    View on GitHub
+                </a>
+            </div>
+        </div>
+
+        <div class="file-selector" id="fileSelector">
+            <div class="instructions">
+                <h3>Load two SRA Verify CSV reports to compare</h3>
+                <p style="margin: 0; font-size: 14px;">Upload your initial scan and a more recent scan to see which
+                    findings have been resolved and where your security posture has improved.</p>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                <div class="file-slot" id="initialSlot">
+                    <h4>
+                        <span
+                            style="background: #6c757d; color: white; width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 14px;">1</span>
+                        Initial scan (baseline)
+                    </h4>
+                    <p style="color: #666; font-size: 13px; margin-bottom: 12px;">The earlier report showing the
+                        starting state.</p>
+                    <div style="position: relative; display: inline-block;">
+                        <input type="file" id="initialCsvFile" class="file-input" accept=".csv" />
+                        <label for="initialCsvFile" class="file-input-label" id="initialCsvLabel">Upload initial
+                            CSV</label>
+                    </div>
+                    <div class="file-name hidden" id="initialFileName"></div>
+                    <div class="file-stats hidden" id="initialFileStats"></div>
+                </div>
+
+                <div class="file-slot" id="updateSlot">
+                    <h4>
+                        <span
+                            style="background: #28a745; color: white; width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 14px;">2</span>
+                        Updated scan (current)
+                    </h4>
+                    <p style="color: #666; font-size: 13px; margin-bottom: 12px;">The later report showing the current
+                        state.</p>
+                    <div style="position: relative; display: inline-block;">
+                        <input type="file" id="updateCsvFile" class="file-input" accept=".csv" />
+                        <label for="updateCsvFile" class="file-input-label" id="updateCsvLabel">Upload updated
+                            CSV</label>
+                    </div>
+                    <div class="file-name hidden" id="updateFileName"></div>
+                    <div class="file-stats hidden" id="updateFileStats"></div>
+                </div>
+            </div>
+
+            <div style="text-align: center; margin-top: 20px;">
+                <button id="compareBtn" class="load-btn" disabled>Compare reports</button>
+            </div>
+        </div>
+
+        <div class="dashboard-content" id="dashboardContent">
+            <div class="section">
+                <div class="progress-banner" id="progressBanner">
+                    <h2>Security improvement</h2>
+                    <div class="big-number" id="resolvedBigNumber">0</div>
+                    <p>findings resolved since the initial scan</p>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar-fill" id="progressBarFill" style="width: 0%;">0%</div>
+                    </div>
+                    <p style="margin-top: 15px; font-size: 0.95em;" id="progressSubtext">Improvement across your AWS
+                        environment</p>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-header">
+                    <div class="section-title">Comparison overview</div>
+                </div>
+                <div class="stats-grid" id="statsGrid" style="padding: 0; background: transparent;">
+                    <div class="stat-card">
+                        <div class="stat-number resolved" id="resolvedCount">-</div>
+                        <div class="stat-label">Resolved findings</div>
+                        <div class="stat-sub">FAIL → PASS</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number persistent" id="persistentCount">-</div>
+                        <div class="stat-label">Still failing</div>
+                        <div class="stat-sub">FAIL → FAIL</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number new-finding" id="newFindingCount">-</div>
+                        <div class="stat-label">New findings</div>
+                        <div class="stat-sub">PASS → FAIL or new</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number pass" id="stillPassingCount">-</div>
+                        <div class="stat-label">Still passing</div>
+                        <div class="stat-sub">PASS → PASS</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" id="resolvedHigh">-</div>
+                        <div class="stat-label">High severity resolved</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" id="resolvedMedium">-</div>
+                        <div class="stat-label">Medium severity resolved</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-header">
+                    <div class="section-title">Before vs. after</div>
+                </div>
+                <div class="comparison-grid">
+                    <div class="comparison-card">
+                        <h3>Failing findings</h3>
+                        <div class="comparison-numbers">
+                            <div class="comparison-number">
+                                <div class="value fail" id="initialFailTotal">-</div>
+                                <div class="label">Initial</div>
+                            </div>
+                            <div class="comparison-arrow">→</div>
+                            <div class="comparison-number">
+                                <div class="value fail" id="updateFailTotal">-</div>
+                                <div class="label">Updated</div>
+                            </div>
+                        </div>
+                        <div style="text-align: center; color: #28a745; font-weight: 600;" id="failDelta"></div>
+                    </div>
+                    <div class="comparison-card">
+                        <h3>Passing findings</h3>
+                        <div class="comparison-numbers">
+                            <div class="comparison-number">
+                                <div class="value pass" id="initialPassTotal">-</div>
+                                <div class="label">Initial</div>
+                            </div>
+                            <div class="comparison-arrow">→</div>
+                            <div class="comparison-number">
+                                <div class="value pass" id="updatePassTotal">-</div>
+                                <div class="label">Updated</div>
+                            </div>
+                        </div>
+                        <div style="text-align: center; color: #28a745; font-weight: 600;" id="passDelta"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-header">
+                    <div class="section-title">Resolved findings by service</div>
+                </div>
+                <div class="section-content">
+                    <div id="resolvedByServiceContent">
+                        <div class="loading">Calculating...</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-header">
+                    <div class="section-title">Detailed comparison</div>
+                    <button class="export-btn" onclick="exportToCSV()">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"
+                            style="width: 16px; height: 16px; fill: currentColor;">
+                            <path
+                                d="M288 32c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 242.7-73.4-73.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l128 128c12.5 12.5 32.8 12.5 45.3 0l128-128c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L288 274.7 288 32zM64 352c-35.3 0-64 28.7-64 64l0 32c0 35.3 28.7 64 64 64l384 0c35.3 0 64-28.7 64-64l0-32c0-35.3-28.7-64-64-64l-101.5 0-45.3 45.3c-25 25-65.5 25-90.5 0L165.5 352 64 352zm368 56a24 24 0 1 1 0 48 24 24 0 1 1 0-48z" />
+                        </svg>
+                        Export filtered results
+                    </button>
+                </div>
+                <div class="section-content">
+                    <div class="tabs" id="tabs">
+                        <button class="tab active" data-tab="resolved">
+                            Resolved <span class="badge resolved" id="resolvedTabBadge">0</span>
+                        </button>
+                        <button class="tab" data-tab="persistent">
+                            Still failing <span class="badge persistent" id="persistentTabBadge">0</span>
+                        </button>
+                        <button class="tab" data-tab="new">
+                            New findings <span class="badge new-finding" id="newTabBadge">0</span>
+                        </button>
+                        <button class="tab" data-tab="passing">
+                            Still passing <span class="badge fixed-also" id="passingTabBadge">0</span>
+                        </button>
+                        <button class="tab" data-tab="all">
+                            All <span class="badge fixed-also" id="allTabBadge">0</span>
+                        </button>
+                    </div>
+
+                    <div class="filter-group">
+                        <label for="severityFilter">Severity:</label>
+                        <select id="severityFilter">
+                            <option value="">All Severities</option>
+                            <option value="HIGH">High</option>
+                            <option value="MEDIUM">Medium</option>
+                            <option value="LOW">Low</option>
+                        </select>
+
+                        <label for="serviceFilter">Service:</label>
+                        <select id="serviceFilter">
+                            <option value="">All Services</option>
+                        </select>
+
+                        <label for="regionFilter">Region:</label>
+                        <select id="regionFilter">
+                            <option value="">All Regions</option>
+                        </select>
+
+                        <label for="accountFilter">Account:</label>
+                        <select id="accountFilter">
+                            <option value="">All Accounts</option>
+                        </select>
+
+                        <input type="text" id="searchBox" class="search-box"
+                            placeholder="Search checks, titles, or resources...">
+                    </div>
+
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <div class="results-count" id="resultsCount" style="color: #666;">-</div>
+                        <div id="paginationControls" style="display: none; align-items: center; gap: 10px;">
+                            <button id="prevPage" class="export-btn" style="padding: 8px 16px;">← Prev</button>
+                            <span id="pageInfo" style="color: #666; font-size: 14px;">Page 1 of 1</span>
+                            <button id="nextPage" class="export-btn" style="padding: 8px 16px;">Next →</button>
+                        </div>
+                    </div>
+
+                    <table class="results-table" id="resultsTable">
+                        <thead>
+                            <tr>
+                                <th onclick="sortTable('Change')">Change</th>
+                                <th onclick="sortTable('Severity')">Severity</th>
+                                <th onclick="sortTable('CheckId')">Check ID</th>
+                                <th onclick="sortTable('Title')">Title</th>
+                                <th onclick="sortTable('Service')">Service</th>
+                                <th onclick="sortTable('Region')">Region</th>
+                                <th onclick="sortTable('AccountId')">Account</th>
+                                <th>Resource</th>
+                                <th>Before → After</th>
+                            </tr>
+                        </thead>
+                        <tbody id="resultsBody"></tbody>
+                    </table>
+
+                    <div id="noResults" class="no-results hidden">
+                        No results match your current filters.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="loadingMessage" class="loading hidden">Loading...</div>
+        <div id="errorMessage" class="error hidden"></div>
+    </div>
+
+    <div class="tooltip" id="tooltip"></div>
+
+    <script>
+        let initialData = null;
+        let updateData = null;
+        let comparedData = []; // combined dataset with Change field
+        let filteredData = [];
+        let currentTab = 'resolved';
+        let sortColumn = '';
+        let sortDirection = 'asc';
+        let currentPage = 1;
+        const rowsPerPage = 25;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('initialCsvFile').addEventListener('change', e => handleFileSelect(e, 'initial'));
+            document.getElementById('updateCsvFile').addEventListener('change', e => handleFileSelect(e, 'update'));
+            document.getElementById('compareBtn').addEventListener('click', runComparison);
+
+            document.getElementById('severityFilter').addEventListener('change', applyFilters);
+            document.getElementById('serviceFilter').addEventListener('change', applyFilters);
+            document.getElementById('regionFilter').addEventListener('change', applyFilters);
+            document.getElementById('accountFilter').addEventListener('change', applyFilters);
+            document.getElementById('searchBox').addEventListener('input', applyFilters);
+            document.getElementById('prevPage').addEventListener('click', () => changePage(-1));
+            document.getElementById('nextPage').addEventListener('click', () => changePage(1));
+
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    currentTab = tab.dataset.tab;
+                    currentPage = 1;
+                    applyFilters();
+                });
+            });
+
+            document.addEventListener('click', (event) => {
+                if (!event.target.classList.contains('expandable-cell')) {
+                    document.getElementById('tooltip').style.display = 'none';
+                }
+            });
+        });
+
+        function handleFileSelect(event, kind) {
+            const file = event.target.files[0];
+            if (!file) return;
+            if (file.type !== 'text/csv' && !file.name.toLowerCase().endsWith('.csv')) {
+                showError('Please select a valid CSV file.');
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const parsed = parseCSV(e.target.result);
+                    if (kind === 'initial') {
+                        initialData = parsed;
+                        markSlotLoaded('initial', file.name, parsed);
+                    } else {
+                        updateData = parsed;
+                        markSlotLoaded('update', file.name, parsed);
+                    }
+                    hideError();
+                    document.getElementById('compareBtn').disabled = !(initialData && updateData);
+                } catch (err) {
+                    showError(`Error parsing ${kind} CSV: ${err.message}`);
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function markSlotLoaded(kind, fileName, data) {
+            const slot = document.getElementById(kind + 'Slot');
+            const label = document.getElementById(kind + 'CsvLabel');
+            const nameEl = document.getElementById(kind + 'FileName');
+            const statsEl = document.getElementById(kind + 'FileStats');
+            slot.classList.add('loaded');
+            label.classList.add('loaded');
+            label.textContent = 'Replace ' + (kind === 'initial' ? 'initial' : 'updated') + ' CSV';
+            nameEl.textContent = fileName;
+            nameEl.classList.remove('hidden');
+            const failCount = data.filter(r => r.Status === 'FAIL').length;
+            const passCount = data.filter(r => r.Status === 'PASS').length;
+            statsEl.textContent = `${data.length} rows loaded — ${passCount} pass, ${failCount} fail`;
+            statsEl.classList.remove('hidden');
+        }
+
+        function parseCSV(csvText) {
+            const lines = csvText.split(/\r?\n/);
+            if (lines.length < 2) throw new Error('CSV appears to be empty');
+            const headers = parseCSVLine(lines[0]).map(h => h.trim());
+            const rows = [];
+            for (let i = 1; i < lines.length; i++) {
+                if (!lines[i].trim()) continue;
+                const values = parseCSVLine(lines[i]);
+                if (values.length !== headers.length) continue;
+                const row = {};
+                headers.forEach((h, idx) => {
+                    row[h] = values[idx] ? values[idx].trim() : '';
+                });
+                rows.push(row);
+            }
+            if (rows.length === 0) throw new Error('No valid data rows found in CSV');
+            return rows;
+        }
+
+        function parseCSVLine(line) {
+            const result = [];
+            let current = '';
+            let inQuotes = false;
+            for (let i = 0; i < line.length; i++) {
+                const c = line[i];
+                if (c === '"') {
+                    if (inQuotes && line[i + 1] === '"') { current += '"'; i++; }
+                    else inQuotes = !inQuotes;
+                } else if (c === ',' && !inQuotes) {
+                    result.push(current); current = '';
+                } else {
+                    current += c;
+                }
+            }
+            result.push(current);
+            return result;
+        }
+
+        // Build a composite key that uniquely identifies a finding
+        function findingKey(row) {
+            return [row.CheckId || '', row.AccountId || '', row.Region || '', row.ResourceId || ''].join('||');
+        }
+
+        function runComparison() {
+            if (!initialData || !updateData) return;
+            showLoading('Comparing reports...');
+
+            const initialMap = new Map();
+            initialData.forEach(r => initialMap.set(findingKey(r), r));
+            const updateMap = new Map();
+            updateData.forEach(r => updateMap.set(findingKey(r), r));
+
+            const allKeys = new Set([...initialMap.keys(), ...updateMap.keys()]);
+            comparedData = [];
+
+            allKeys.forEach(key => {
+                const before = initialMap.get(key);
+                const after = updateMap.get(key);
+                let change;
+                if (before && after) {
+                    if (before.Status === 'FAIL' && after.Status === 'PASS') change = 'RESOLVED';
+                    else if (before.Status === 'PASS' && after.Status === 'FAIL') change = 'NEW';
+                    else if (before.Status === 'FAIL' && after.Status === 'FAIL') change = 'PERSISTENT';
+                    else change = 'UNCHANGED_PASS';
+                } else if (!before && after) {
+                    change = after.Status === 'FAIL' ? 'NEW' : 'UNCHANGED_PASS';
+                } else {
+                    // In initial only — disappeared from updated scan. Treat resolved only if it was failing.
+                    change = before.Status === 'FAIL' ? 'RESOLVED' : 'UNCHANGED_PASS';
+                }
+
+                const primary = after || before;
+                comparedData.push({
+                    ...primary,
+                    Change: change,
+                    BeforeStatus: before ? before.Status : 'N/A',
+                    AfterStatus: after ? after.Status : 'N/A',
+                    BeforeActualValue: before ? (before.ActualValue || '') : '',
+                    AfterActualValue: after ? (after.ActualValue || '') : ''
+                });
+            });
+
+            hideLoading();
+            document.getElementById('dashboardContent').classList.add('active');
+            populateFilters();
+            updateOverview();
+            renderResolvedByService();
+            updateTabBadges();
+            applyFilters();
+            // Scroll the dashboard into view for a smooth experience
+            document.getElementById('dashboardContent').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function updateOverview() {
+            const resolved = comparedData.filter(r => r.Change === 'RESOLVED');
+            const persistent = comparedData.filter(r => r.Change === 'PERSISTENT');
+            const news = comparedData.filter(r => r.Change === 'NEW');
+            const stillPassing = comparedData.filter(r => r.Change === 'UNCHANGED_PASS');
+
+            document.getElementById('resolvedCount').textContent = resolved.length;
+            document.getElementById('persistentCount').textContent = persistent.length;
+            document.getElementById('newFindingCount').textContent = news.length;
+            document.getElementById('stillPassingCount').textContent = stillPassing.length;
+
+            document.getElementById('resolvedHigh').textContent = resolved.filter(r => r.Severity === 'HIGH').length;
+            document.getElementById('resolvedMedium').textContent = resolved.filter(r => r.Severity === 'MEDIUM').length;
+
+            const initialFail = initialData.filter(r => r.Status === 'FAIL').length;
+            const updateFail = updateData.filter(r => r.Status === 'FAIL').length;
+            const initialPass = initialData.filter(r => r.Status === 'PASS').length;
+            const updatePass = updateData.filter(r => r.Status === 'PASS').length;
+
+            document.getElementById('initialFailTotal').textContent = initialFail;
+            document.getElementById('updateFailTotal').textContent = updateFail;
+            document.getElementById('initialPassTotal').textContent = initialPass;
+            document.getElementById('updatePassTotal').textContent = updatePass;
+
+            const failDiff = initialFail - updateFail;
+            const passDiff = updatePass - initialPass;
+            const failDeltaEl = document.getElementById('failDelta');
+            const passDeltaEl = document.getElementById('passDelta');
+            if (failDiff > 0) {
+                failDeltaEl.textContent = `↓ ${failDiff} fewer failing findings`;
+                failDeltaEl.style.color = '#28a745';
+            } else if (failDiff < 0) {
+                failDeltaEl.textContent = `↑ ${Math.abs(failDiff)} more failing findings`;
+                failDeltaEl.style.color = '#dc3545';
+            } else {
+                failDeltaEl.textContent = 'No change';
+                failDeltaEl.style.color = '#666';
+            }
+            if (passDiff > 0) {
+                passDeltaEl.textContent = `↑ ${passDiff} more passing findings`;
+                passDeltaEl.style.color = '#28a745';
+            } else if (passDiff < 0) {
+                passDeltaEl.textContent = `↓ ${Math.abs(passDiff)} fewer passing findings`;
+                passDeltaEl.style.color = '#dc3545';
+            } else {
+                passDeltaEl.textContent = 'No change';
+                passDeltaEl.style.color = '#666';
+            }
+
+            // Big progress banner
+            document.getElementById('resolvedBigNumber').textContent = resolved.length;
+            const improvementDenom = initialFail; // percent of initial failing that are now fixed
+            let pct = 0;
+            if (improvementDenom > 0) {
+                pct = Math.round((resolved.length / improvementDenom) * 100);
+                pct = Math.max(0, Math.min(100, pct));
+            }
+            const bar = document.getElementById('progressBarFill');
+            setTimeout(() => { bar.style.width = pct + '%'; bar.textContent = pct + '%'; }, 100);
+            const subtext = document.getElementById('progressSubtext');
+            if (initialFail === 0) {
+                subtext.textContent = 'No failing findings in the initial scan.';
+            } else {
+                subtext.textContent = `${pct}% of the ${initialFail} failing findings from the initial scan have been resolved.`;
+            }
+        }
+
+        function renderResolvedByService() {
+            const resolved = comparedData.filter(r => r.Change === 'RESOLVED');
+            const container = document.getElementById('resolvedByServiceContent');
+            if (resolved.length === 0) {
+                container.innerHTML = '<div style="text-align: center; padding: 20px; color: #666;">No findings have been resolved yet. Keep working on those remediations!</div>';
+                return;
+            }
+            const byService = {};
+            resolved.forEach(r => {
+                const svc = r.Service || 'Unknown';
+                if (!byService[svc]) byService[svc] = { count: 0, high: 0, medium: 0, low: 0, regions: new Set(), accounts: new Set() };
+                byService[svc].count++;
+                const sev = (r.Severity || '').toUpperCase();
+                if (sev === 'HIGH') byService[svc].high++;
+                else if (sev === 'MEDIUM') byService[svc].medium++;
+                else if (sev === 'LOW') byService[svc].low++;
+                if (r.Region) byService[svc].regions.add(r.Region);
+                if (r.AccountId) byService[svc].accounts.add(r.AccountId);
+            });
+            const sorted = Object.entries(byService).sort((a, b) => b[1].count - a[1].count);
+            const max = sorted[0][1].count;
+            let html = '<div style="display: grid; gap: 12px;">';
+            sorted.forEach(([svc, data]) => {
+                const width = Math.round((data.count / max) * 100);
+                html += `
+                    <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 4px solid #28a745;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                            <div style="font-weight: 600; color: #333;">${escapeHtml(svc)}</div>
+                            <div style="color: #28a745; font-weight: 600;">${data.count} resolved</div>
+                        </div>
+                        <div style="background: #e9ecef; border-radius: 10px; height: 10px; overflow: hidden; margin-bottom: 8px;">
+                            <div style="background: #28a745; height: 100%; width: ${width}%;"></div>
+                        </div>
+                        <div style="font-size: 12px; color: #666;">
+                            ${data.high ? `<span style="color: #dc3545; font-weight: 600;">${data.high} high</span>` : ''}
+                            ${data.high && (data.medium || data.low) ? ' · ' : ''}
+                            ${data.medium ? `<span style="color: #ffc107; font-weight: 600;">${data.medium} medium</span>` : ''}
+                            ${data.medium && data.low ? ' · ' : ''}
+                            ${data.low ? `<span style="color: #17a2b8; font-weight: 600;">${data.low} low</span>` : ''}
+                            ${(data.high || data.medium || data.low) ? ' · ' : ''}
+                            across ${data.regions.size} region${data.regions.size !== 1 ? 's' : ''}, ${data.accounts.size} account${data.accounts.size !== 1 ? 's' : ''}
+                        </div>
+                    </div>
+                `;
+            });
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
+        function populateFilters() {
+            const services = [...new Set(comparedData.map(r => r.Service).filter(Boolean))].sort();
+            const regions = [...new Set(comparedData.map(r => r.Region).filter(Boolean))].sort();
+            const accounts = [...new Set(comparedData.map(r => r.AccountId).filter(Boolean))].sort();
+            const serviceSel = document.getElementById('serviceFilter');
+            const regionSel = document.getElementById('regionFilter');
+            const accountSel = document.getElementById('accountFilter');
+            serviceSel.innerHTML = '<option value="">All Services</option>';
+            regionSel.innerHTML = '<option value="">All Regions</option>';
+            accountSel.innerHTML = '<option value="">All Accounts</option>';
+            services.forEach(s => serviceSel.appendChild(new Option(s, s)));
+            regions.forEach(r => regionSel.appendChild(new Option(r, r)));
+            accounts.forEach(a => {
+                const row = comparedData.find(r => r.AccountId === a);
+                const name = row && row.AccountName ? `${row.AccountName} (${a})` : a;
+                accountSel.appendChild(new Option(name, a));
+            });
+        }
+
+        function updateTabBadges() {
+            document.getElementById('resolvedTabBadge').textContent = comparedData.filter(r => r.Change === 'RESOLVED').length;
+            document.getElementById('persistentTabBadge').textContent = comparedData.filter(r => r.Change === 'PERSISTENT').length;
+            document.getElementById('newTabBadge').textContent = comparedData.filter(r => r.Change === 'NEW').length;
+            document.getElementById('passingTabBadge').textContent = comparedData.filter(r => r.Change === 'UNCHANGED_PASS').length;
+            document.getElementById('allTabBadge').textContent = comparedData.length;
+        }
+
+        function applyFilters() {
+            const severity = document.getElementById('severityFilter').value;
+            const service = document.getElementById('serviceFilter').value;
+            const region = document.getElementById('regionFilter').value;
+            const account = document.getElementById('accountFilter').value;
+            const search = (document.getElementById('searchBox').value || '').toLowerCase();
+
+            const tabFilter = (r) => {
+                if (currentTab === 'all') return true;
+                if (currentTab === 'resolved') return r.Change === 'RESOLVED';
+                if (currentTab === 'persistent') return r.Change === 'PERSISTENT';
+                if (currentTab === 'new') return r.Change === 'NEW';
+                if (currentTab === 'passing') return r.Change === 'UNCHANGED_PASS';
+                return true;
+            };
+
+            filteredData = comparedData.filter(r => {
+                return tabFilter(r) &&
+                    (!severity || r.Severity === severity) &&
+                    (!service || r.Service === service) &&
+                    (!region || r.Region === region) &&
+                    (!account || r.AccountId === account) &&
+                    (!search ||
+                        (r.CheckId && r.CheckId.toLowerCase().includes(search)) ||
+                        (r.Title && r.Title.toLowerCase().includes(search)) ||
+                        (r.Description && r.Description.toLowerCase().includes(search)) ||
+                        (r.ResourceId && r.ResourceId.toLowerCase().includes(search)));
+            });
+
+            currentPage = 1;
+            renderTable();
+        }
+
+        function changePage(direction) {
+            const totalPages = Math.ceil(filteredData.length / rowsPerPage);
+            const newPage = currentPage + direction;
+            if (newPage >= 1 && newPage <= totalPages) {
+                currentPage = newPage;
+                renderTable();
+            }
+        }
+
+        function renderTable() {
+            const tbody = document.getElementById('resultsBody');
+            const resultsCount = document.getElementById('resultsCount');
+            const noResults = document.getElementById('noResults');
+            const table = document.getElementById('resultsTable');
+            const paginationControls = document.getElementById('paginationControls');
+
+            if (filteredData.length === 0) {
+                table.classList.add('hidden');
+                noResults.classList.remove('hidden');
+                paginationControls.style.display = 'none';
+                resultsCount.textContent = 'No results found';
+                return;
+            }
+            table.classList.remove('hidden');
+            noResults.classList.add('hidden');
+
+            const totalPages = Math.ceil(filteredData.length / rowsPerPage);
+            const startIndex = (currentPage - 1) * rowsPerPage;
+            const endIndex = Math.min(startIndex + rowsPerPage, filteredData.length);
+            const pageData = filteredData.slice(startIndex, endIndex);
+
+            if (totalPages > 1) {
+                paginationControls.style.display = 'flex';
+                document.getElementById('pageInfo').textContent = `Page ${currentPage} of ${totalPages}`;
+                document.getElementById('prevPage').disabled = currentPage === 1;
+                document.getElementById('nextPage').disabled = currentPage === totalPages;
+            } else {
+                paginationControls.style.display = 'none';
+            }
+
+            resultsCount.textContent = `Showing ${startIndex + 1}-${endIndex} of ${filteredData.length} results`;
+
+            tbody.innerHTML = '';
+            pageData.forEach(row => {
+                const tr = document.createElement('tr');
+                const changeLabel = changeBadgeLabel(row.Change);
+                const changeClass = changeBadgeClass(row.Change);
+                const beforeAfter = renderBeforeAfter(row);
+                tr.innerHTML = `
+                    <td><span class="change-badge ${changeClass}">${changeLabel}</span></td>
+                    <td><span class="severity-badge severity-${(row.Severity || '').toLowerCase()}">${row.Severity || ''}</span></td>
+                    <td><strong>${row.CheckId || ''}</strong></td>
+                    <td class="expandable-cell" onclick="showTooltip(event, '${escapeHtml(row.Title || '')}')">${row.Title || ''}</td>
+                    <td>${row.Service || ''}</td>
+                    <td>${row.Region || ''}</td>
+                    <td>${formatAccountDisplay(row.AccountName, row.AccountId)}</td>
+                    <td class="expandable-cell" onclick="showTooltip(event, '${escapeHtml(row.ResourceId || '')}')">${row.ResourceId || ''}</td>
+                    <td>${beforeAfter}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function renderBeforeAfter(row) {
+            const beforeBadge = row.BeforeStatus === 'N/A'
+                ? '<span style="color:#999; font-size: 12px;">not in initial</span>'
+                : `<span class="status-badge status-${row.BeforeStatus.toLowerCase()}">${row.BeforeStatus}</span>`;
+            const afterBadge = row.AfterStatus === 'N/A'
+                ? '<span style="color:#999; font-size: 12px;">not in updated</span>'
+                : `<span class="status-badge status-${row.AfterStatus.toLowerCase()}">${row.AfterStatus}</span>`;
+            return `<div style="display: flex; align-items: center; gap: 6px; white-space: nowrap;">${beforeBadge} <span style="color:#999;">→</span> ${afterBadge}</div>`;
+        }
+
+        function changeBadgeLabel(change) {
+            switch (change) {
+                case 'RESOLVED': return 'Resolved';
+                case 'PERSISTENT': return 'Still failing';
+                case 'NEW': return 'New';
+                case 'UNCHANGED_PASS': return 'Still passing';
+                default: return change;
+            }
+        }
+
+        function changeBadgeClass(change) {
+            switch (change) {
+                case 'RESOLVED': return 'change-resolved';
+                case 'PERSISTENT': return 'change-persistent';
+                case 'NEW': return 'change-new';
+                case 'UNCHANGED_PASS': return 'change-unchanged-pass';
+                default: return '';
+            }
+        }
+
+        function sortTable(column) {
+            if (sortColumn === column) {
+                sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                sortColumn = column;
+                sortDirection = 'asc';
+            }
+            filteredData.sort((a, b) => {
+                const av = (a[column] || '').toString();
+                const bv = (b[column] || '').toString();
+                return sortDirection === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+            });
+            renderTable();
+        }
+
+        function formatAccountDisplay(accountName, accountId) {
+            if (!accountId) return '';
+            if (!accountName || accountName.trim() === '') return accountId;
+            return `${accountName} (${accountId})`;
+        }
+
+        function escapeHtml(text) {
+            if (text === null || text === undefined) return '';
+            return String(text).replace(/&/g, '&amp;').replace(/'/g, '&#39;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        function showTooltip(event, text) {
+            if (!text) return;
+            const tooltip = document.getElementById('tooltip');
+            tooltip.innerHTML = text;
+            tooltip.style.display = 'block';
+            tooltip.style.left = event.pageX + 10 + 'px';
+            tooltip.style.top = event.pageY + 10 + 'px';
+            setTimeout(() => { tooltip.style.display = 'none'; }, 3000);
+        }
+
+        function exportToCSV() {
+            if (!filteredData.length) {
+                alert('No data to export');
+                return;
+            }
+            const headers = ['Change', 'Severity', 'CheckId', 'Title', 'Service', 'Region', 'AccountId', 'AccountName', 'ResourceId', 'ResourceType', 'BeforeStatus', 'AfterStatus', 'BeforeActualValue', 'AfterActualValue', 'Description', 'Remediation'];
+            let csv = headers.join(',') + '\n';
+            filteredData.forEach(row => {
+                const values = headers.map(h => {
+                    const v = row[h] !== undefined && row[h] !== null ? String(row[h]) : '';
+                    return v.includes(',') || v.includes('"') || v.includes('\n') ? `"${v.replace(/"/g, '""')}"` : v;
+                });
+                csv += values.join(',') + '\n';
+            });
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `sra-verify-comparison-${new Date().toISOString().split('T')[0]}.csv`;
+            a.click();
+            window.URL.revokeObjectURL(url);
+        }
+
+        function showLoading(message) {
+            document.getElementById('loadingMessage').textContent = message || 'Loading...';
+            document.getElementById('loadingMessage').classList.remove('hidden');
+            document.getElementById('errorMessage').classList.add('hidden');
+        }
+        function hideLoading() {
+            document.getElementById('loadingMessage').classList.add('hidden');
+        }
+        function showError(message) {
+            document.getElementById('errorMessage').textContent = message;
+            document.getElementById('errorMessage').classList.remove('hidden');
+            document.getElementById('loadingMessage').classList.add('hidden');
+        }
+        function hideError() {
+            document.getElementById('errorMessage').classList.add('hidden');
+        }
+    </script>
+</body>
+
+</html>
