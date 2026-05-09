@@ -171,6 +171,7 @@ Resources:
             Effect: Allow
             Action:
               - iam:GetRole
+              - iam:ListUsers
             Resource: '*'
           - Sid: Inspector2Permissions
             Effect: Allow
