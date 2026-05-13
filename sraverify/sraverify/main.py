@@ -33,6 +33,7 @@ from sraverify.services.firewallmanager import CHECKS as firewallmanager_checks
 from sraverify.services.securitylake import CHECKS as securitylake_checks
 from sraverify.services.securityincidentresponse import CHECKS as securityincidentresponse_checks
 from sraverify.services.organizations import CHECKS as organizations_checks
+from sraverify.services.iam import CHECKS as iam_checks
 
 # Collect all checks from different services
 ALL_CHECKS = {
@@ -52,7 +53,8 @@ ALL_CHECKS = {
     **firewallmanager_checks,
     **securitylake_checks,
     **securityincidentresponse_checks,
-    **organizations_checks
+    **organizations_checks,
+    **iam_checks
 }
 
 class SRAVerify:
