@@ -66,6 +66,7 @@ Available checks:
   SRA-GUARDDUTY-23: GuardDuty Runtime Monitoring auto-enablement configured (GuardDuty) [audit]
   SRA-GUARDDUTY-24: GuardDuty Lambda Network Logs auto-enablement configured (GuardDuty) [audit]
   SRA-GUARDDUTY-25: GuardDuty RDS Login Events auto-enablement configured (GuardDuty) [audit]
+  SRA-IAM-01: Account contains no IAM users (IAM) [application]
   SRA-INSPECTOR-01: Inspector service is enabled (Inspector) [application]
   SRA-INSPECTOR-02: Inspector EC2 vulnerability scanning is enabled (Inspector) [application]
   SRA-INSPECTOR-03: Inspector ECR image vulnerability scanning is enabled (Inspector) [application]
