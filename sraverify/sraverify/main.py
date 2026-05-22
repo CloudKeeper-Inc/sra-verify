@@ -307,6 +307,19 @@ def parse_args():
     parser.add_argument('--list-services', action='store_true', help='List available services')
     parser.add_argument('--debug', action='store_true', help='Enable debug logging')
 
+    # Bounded boto3 Client_Config knobs forwarded into the per-scan
+    # ScanContext. Defaults match the ScanContext defaults (10s connect,
+    # 30s read, 3 retry attempts, 50 pool connections); when these flags
+    # are omitted the ScanContext defaults take effect.
+    parser.add_argument('--connect-timeout', type=float, default=None,
+                        help='boto3 connect timeout in seconds (default: 10)')
+    parser.add_argument('--read-timeout', type=float, default=None,
+                        help='boto3 read timeout in seconds (default: 30)')
+    parser.add_argument('--max-attempts', type=int, default=None,
+                        help='boto3 retry max_attempts (default: 3)')
+    parser.add_argument('--max-pool-connections', type=int, default=None,
+                        help='boto3 max_pool_connections (default: 50)')
+
     return parser.parse_args()
 
 
@@ -316,7 +329,16 @@ def main():
 
     # Create SRAVerify instance
     regions = [r.strip() for r in args.regions.split(',')] if args.regions else None
-    sra = SRAVerify(profile=args.profile, role_arn=args.role, regions=regions, debug=args.debug)
+    sra = SRAVerify(
+        profile=args.profile,
+        role_arn=args.role,
+        regions=regions,
+        debug=args.debug,
+        connect_timeout=args.connect_timeout,
+        read_timeout=args.read_timeout,
+        max_attempts=args.max_attempts,
+        max_pool_connections=args.max_pool_connections,
+    )
 
     if args.list_checks:
         checks = sra.get_available_checks(args.account_type)
