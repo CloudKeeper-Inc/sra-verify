@@ -349,6 +349,41 @@ Examples:
 
 When SRA Verify is deployed and run via CodeBuild, management checks will be ran on the management account. Account checks will be ran on each member.
 
+## Running without AWS Organizations access
+
+SRA Verify can run in environments that do **not** allow AWS Organizations API access or service delegated administrators (for example, scanning a set of member accounts individually without management-account access).
+
+In this mode, checks that inherently require Organizations / delegated-administrator context cannot be assessed. Rather than reporting them as misleading `FAIL`s, SRA Verify reports them with a dedicated status:
+
+- **`INSUFFICIENT_DATA`** — the control could not be evaluated because the required AWS Organizations / delegated-administrator access is not available in this account or deployment. This is **not** a finding of misconfiguration; it means "not assessable here".
+
+### How it is decided
+
+A check requires org access if its account type is anything other than `application` (i.e. all `management`, `audit`, and `log-archive` checks). The 63 `application` checks always run standalone and are unaffected.
+
+At runtime SRA Verify performs a single lightweight `organizations:ListAccounts` probe to determine whether org access is available:
+
+- If the probe succeeds (management account or Organizations delegated administrator), all checks run normally — behavior is unchanged.
+- If the probe is denied / fails, every org-dependent check reports `INSUFFICIENT_DATA` instead of executing (no wasted, denied API calls).
+
+### Flags
+
+You can override the auto-detection:
+
+```bash
+# Force "no org access" — org-dependent checks report INSUFFICIENT_DATA
+sraverify --account-type all --no-org-access --regions us-east-1
+
+# Force "org access available" — skip the probe (normal org deployment)
+sraverify --account-type all --assume-org-access --regions us-east-1
+```
+
+When running per-account application-only scans, none of the org-dependent checks are selected, so the flag has no effect:
+
+```bash
+sraverify --account-type application --regions us-east-1
+```
+
 ## Library Usage
 ### Installation as a Library
 ```bash

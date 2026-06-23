@@ -3,15 +3,29 @@ Base class for security checks.
 """
 from typing import List, Optional, Dict, Any
 import boto3
+from botocore.exceptions import ClientError
 from sraverify.core.logging import logger
+
+# Status used when a check cannot be evaluated because the required AWS
+# Organizations / delegated-administrator context is not available in this
+# account or deployment (e.g. multi-account scanning without an org setup).
+# This is distinct from FAIL: it means "not assessable here", not "misconfigured".
+INSUFFICIENT_DATA = "INSUFFICIENT_DATA"
 
 
 class SecurityCheck:
     """Base class for all security checks."""
-    
+
     # Class-level cache for account information shared across all instances
     _account_info_cache = {}
-    
+
+    # Tri-state org-access availability shared across all instances.
+    #   None  -> not yet determined (probe will run on first use)
+    #   True  -> account can read AWS Organizations data (management or delegated admin)
+    #   False -> no Organizations/delegated-admin access (multi-account-without-org setup)
+    # Can be set explicitly via set_org_access() to honor CLI overrides.
+    _org_access_available = None
+
     def __init__(self, account_type="application", service=None, resource_type=None):
         """
         Initialize security check.
@@ -135,10 +149,120 @@ class SecurityCheck:
             "AccountType": self.account_type
         }
     
+    @property
+    def requires_org_access(self) -> bool:
+        """
+        Whether this check depends on AWS Organizations / delegated-administrator
+        access to produce a meaningful result.
+
+        Every non-application check (management, audit, log-archive) presupposes
+        either Organizations API access or that the scanning account is a service
+        delegated administrator. Application checks are evaluated standalone within
+        a single account and never require org access.
+        """
+        return self.account_type != "application"
+
+    def create_insufficient_data_finding(self, region: str,
+                                         resource_id: Optional[str] = None,
+                                         reason: Optional[str] = None,
+                                         remediation: Optional[str] = None
+                                         ) -> Dict[str, Any]:
+        """
+        Create a standardized INSUFFICIENT_DATA finding.
+
+        Used when a check cannot be evaluated because the required AWS
+        Organizations / delegated-administrator context is unavailable.
+
+        Args:
+            region: AWS region (or "global" for non-regional checks)
+            resource_id: Optional resource identifier
+            reason: Human-readable reason (defaults to a standard message)
+            remediation: Optional remediation/explanation
+
+        Returns:
+            Finding dictionary with status INSUFFICIENT_DATA
+        """
+        if reason is None:
+            reason = ("Check requires AWS Organizations / delegated administrator "
+                      "access, which is not available in this account or deployment.")
+        if remediation is None:
+            remediation = ("This check evaluates an organization-level or delegated-"
+                           "administrator control. Run it from the AWS Organizations "
+                           "management account or the relevant service's delegated "
+                           "administrator account. In a multi-account scan without an "
+                           "organization setup, this control cannot be assessed.")
+        return self.create_finding(
+            status=INSUFFICIENT_DATA,
+            region=region,
+            resource_id=resource_id,
+            actual_value=reason,
+            remediation=remediation,
+            checked_value=f"{self.service} organization/delegated-admin configuration"
+        )
+
+    def build_insufficient_data_findings(self) -> List[Dict[str, Any]]:
+        """
+        Build the INSUFFICIENT_DATA finding(s) for this check without calling any
+        AWS APIs. Emits a single finding per check (region "global") to keep the
+        report clean rather than one identical row per region.
+
+        Returns:
+            List containing a single INSUFFICIENT_DATA finding
+        """
+        finding = self.create_insufficient_data_finding(region="global")
+        self.findings.append(finding)
+        return [finding]
+
+    @classmethod
+    def set_org_access(cls, available: Optional[bool]) -> None:
+        """
+        Explicitly set whether Organizations/delegated-admin access is available,
+        overriding auto-detection. Pass None to reset and allow auto-detection.
+        """
+        cls._org_access_available = available
+
+    @classmethod
+    def detect_org_access(cls, session: boto3.Session) -> bool:
+        """
+        Determine (once, cached) whether the current credentials can read AWS
+        Organizations data. Uses a lightweight organizations:ListAccounts probe.
+
+        - Succeeds  -> management account or Organizations delegated administrator.
+        - AccessDenied / failure -> no org/delegated-admin access.
+
+        The result is cached at the class level so the probe runs only once per
+        process. If set_org_access() was already called, that value is honored.
+
+        Args:
+            session: AWS session to probe with
+
+        Returns:
+            True if Organizations data is readable, False otherwise
+        """
+        if cls._org_access_available is not None:
+            return cls._org_access_available
+
+        try:
+            logger.debug("Probing AWS Organizations access (organizations:ListAccounts)")
+            org_client = session.client("organizations")
+            org_client.list_accounts(MaxResults=1)
+            cls._org_access_available = True
+            logger.debug("Organizations access available")
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "")
+            logger.debug(f"Organizations access not available ({error_code}); "
+                         "org/delegated-admin checks will report INSUFFICIENT_DATA")
+            cls._org_access_available = False
+        except Exception as e:
+            logger.debug(f"Organizations access probe failed ({e}); assuming no org access")
+            cls._org_access_available = False
+
+        return cls._org_access_available
+
     def execute(self) -> List[Dict[str, Any]]:
         """
         Execute the check. Must be implemented by subclasses.
-        
+
         Returns:
             List of findings
         """

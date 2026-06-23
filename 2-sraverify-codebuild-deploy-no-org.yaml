@@ -1,0 +1,465 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudFormation template to deploy SRAVerify CodeBuild project (org-independent: scans an explicit list of member accounts, no AWS Organizations API calls)'
+
+Parameters:
+  TargetAccountIDs:
+    Type: String
+    Description: Comma-separated list of the member account IDs to scan (e.g. 111111111111,222222222222,333333333333,444444444444). Replaces the AWS Organizations list-accounts lookup.
+
+  AuditAccountID:
+    Type: String
+    Default: ''
+    Description: (Optional) Account ID to run audit / Security Tooling checks against. Leave blank if none of the target accounts is a designated audit/delegated-admin account. Comma-separated list supported.
+
+  LogArchiveAccountID:
+    Type: String
+    Default: ''
+    Description: (Optional) Account ID to run log-archive checks against. Leave blank if none of the target accounts is a designated log-archive account. Comma-separated list supported.
+
+  ParallelAccounts:
+    Type: Number
+    Description: Number of accounts to scan in parallel
+    Default: 5
+    MinValue: 1
+    MaxValue: 20
+
+  ScanMode:
+    Type: String
+    AllowedValues:
+      - ApplicationOnly
+      - AllWithInsufficientData
+    Default: ApplicationOnly
+    Description: >-
+      ApplicationOnly (default): run only the per-account checks that work without
+      AWS Organizations access (clean PASS/FAIL). AllWithInsufficientData: run every
+      check per account with --no-org-access, so org/delegated-admin checks appear in
+      the report as INSUFFICIENT_DATA instead of being omitted.
+
+  IncludeRegions:
+    Type: String
+    Description: Comma-separated list of AWS regions to include in the scan
+    Default: 'us-east-1,us-east-2,us-west-2'
+
+  SourceRepoUrl:
+    Type: String
+    Default: https://github.com/CloudKeeper-Inc/sra-verify.git
+    Description: >-
+      Git URL of the SRA Verify source to install. Defaults to the CloudKeeper fork,
+      which contains the org-independent features (INSUFFICIENT_DATA status,
+      --no-org-access flag, ScanMode). Do NOT point this at upstream awslabs/sra-verify
+      - those features are not present there and the build will fail when
+      ScanMode=AllWithInsufficientData.
+
+  GitBranch:
+    Type: String
+    Description: The git branch name to pull code from. Deploy the updated 1-sraverify-member-roles.yaml from the same branch to get the latest permissions.
+    Default: main
+
+Resources:
+  # This is the role that Codebuild uses
+  SRAVerifyCodeBuildServiceRole:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: Star resource required for actions
+          - id: W28
+            reason: Explicit name used for role for easy identification.
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: SRAVerifyCodeBuildServiceRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceArn: !Sub 'arn:${AWS::Partition}:codebuild:${AWS::Region}:${AWS::AccountId}:project/SRAVerify-Security-Assessment'
+      Policies:
+        - PolicyName: CodeBuildServiceRolePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource:
+                  - !Sub '${bucketSRAVerifyFindings.Arn}/*'
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource:
+                  - !Sub '${bucketSRAVerifyFindings.Arn}'
+              - Effect: Allow
+                Action:
+                  - sts:AssumeRole
+                Resource: !Sub 'arn:${AWS::Partition}:iam::*:role/SRAMemberRole'
+              # NOTE: organizations:ListAccounts / DescribeOrganization intentionally removed.
+              # This deployment does not call the AWS Organizations API.
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeRegions
+                Resource: '*'
+
+  # S3 bucket for the SRA Verify findings.
+  # Amazon Q suggests S3 bucket encryption, S3 Object Lock, and S3 Bucket replication. These features are not required for SRA Verify.
+  # amazonq-ignore-next-line
+  bucketSRAVerifyFindings:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W35
+            reason: No bucket logging needed.
+          - id: W41
+            reason: Amazon S3 now applies server-side encryption with Amazon S3 managed keys (SSE-S3) as the base level of encryption for every bucket in Amazon S3.
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Type: AWS::S3::Bucket
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  bucketPolicySRAVerifyFindings:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref bucketSRAVerifyFindings
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowSSLRequestsOnly
+            Principal: '*'
+            Action: 's3:*'
+            Effect: Deny
+            Resource:
+              - !Sub '${bucketSRAVerifyFindings.Arn}'
+              - !Sub '${bucketSRAVerifyFindings.Arn}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+
+  # CodeBuild Project
+  SRAVerifyCodeBuildProject:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W32
+            reason: No KMS keys are specified. This project uses the default AWS managed keys.
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: SRAVerify-Security-Assessment
+      Description: 'CodeBuild project for running SRAVerify security assessment (org-independent)'
+      ServiceRole: !GetAtt SRAVerifyCodeBuildServiceRole.Arn
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+        EnvironmentVariables:
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref 'AWS::Region'
+          - Name: PARALLEL_ACCOUNTS
+            Value: !Ref ParallelAccounts
+          - Name: INCLUDE_REGIONS
+            Value: !Ref IncludeRegions
+          - Name: S3_SRA_RESULTS_BUCKET
+            Value: !Ref bucketPolicySRAVerifyFindings
+          - Name: TARGET_ACCOUNTS
+            Value: !Ref TargetAccountIDs
+          - Name: SCAN_MODE
+            Value: !Ref ScanMode
+          - Name: AWS_AUDIT_ACCOUNTS
+            Value: !Ref AuditAccountID
+          - Name: AWS_LOG_ARCHIVE_ACCOUNTS
+            Value: !Ref LogArchiveAccountID
+          - Name: AWS_PARTITION
+            Value: !Sub ${AWS::Partition}
+          - Name: GIT_BRANCH
+            Value: !Ref GitBranch
+          - Name: SOURCE_REPO_URL
+            Value: !Ref SourceRepoUrl
+
+      Source:
+        Type: NO_SOURCE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            install:
+              runtime-versions:
+                python: 3.11
+              commands:
+                - echo "Setting up SRAVerify environment..."
+                - pip3 install --upgrade pip
+                - pip3 install boto3 pandas
+                - git clone -b $GIT_BRANCH "$SOURCE_REPO_URL" sra-verify-src
+                - pip install ./sra-verify-src/sraverify
+
+            build:
+              commands:
+                - |
+                  # Create directories for results
+                  mkdir -p /tmp/sraverify-results
+                  timestamp=$(date +%Y%m%d_%H%M%S)
+                  export timestamp
+
+                  # Define partition and region being ran from
+                  echo "Running in AWS partition: $AWS_PARTITION"
+                  echo "Running in AWS region: $AWS_DEFAULT_REGION"
+
+                  # Use the explicit, operator-supplied account list.
+                  # No AWS Organizations API calls are made.
+                  account_list=$(echo "$TARGET_ACCOUNTS" | tr ',' ' ')
+                  echo "Target accounts to scan: $account_list"
+                  export account_list
+
+                  if [ -z "$account_list" ]; then
+                      echo "ERROR: TARGET_ACCOUNTS is empty. Provide TargetAccountIDs."
+                      exit 1
+                  fi
+
+                  # NOTE: Management/organization-level checks are intentionally not run
+                  # against a management account. This deployment has no management-account
+                  # access and makes no Organizations API calls.
+                  #
+                  # Scan behaviour is controlled by SCAN_MODE:
+                  #   ApplicationOnly         - run only the per-account checks that work
+                  #                             without org access (clean PASS/FAIL).
+                  #   AllWithInsufficientData - run every check per account with
+                  #                             --no-org-access, so org/delegated-admin
+                  #                             checks appear as INSUFFICIENT_DATA.
+                  echo "Scan mode: $SCAN_MODE"
+
+                  # The optional audit/log-archive runs below only apply in ApplicationOnly
+                  # mode (in AllWithInsufficientData mode those checks are already covered by
+                  # the per-account 'all' scan and would otherwise be duplicated). They are
+                  # primarily useful when a designated account is genuinely the delegated
+                  # administrator for a service; otherwise their checks degrade to
+                  # INSUFFICIENT_DATA.
+                  if [ "$SCAN_MODE" = "ApplicationOnly" ] && [ "$AWS_AUDIT_ACCOUNTS" != "" ]; then
+                      echo "Running audit checks..."
+                      for account in $(echo $AWS_AUDIT_ACCOUNTS | tr ',' ' '); do
+                          echo "Running audit checks for account: $account"
+                          mkdir -p "/tmp/sraverify-results/${account}-audit"
+                          cd "/tmp/sraverify-results/${account}-audit"
+                          sraverify \
+                              --role arn:$AWS_PARTITION:iam::${account}:role/SRAMemberRole \
+                              --account-type audit \
+                              --regions ${INCLUDE_REGIONS} \
+                              --audit-account ${AWS_AUDIT_ACCOUNTS} \
+                              --log-archive-account ${AWS_LOG_ARCHIVE_ACCOUNTS} || echo "audit checks for ${account} returned non-zero; continuing"
+                      done
+                  fi
+
+                  if [ "$SCAN_MODE" = "ApplicationOnly" ] && [ "$AWS_LOG_ARCHIVE_ACCOUNTS" != "" ]; then
+                      echo "Running log archive checks..."
+                      for account in $(echo $AWS_LOG_ARCHIVE_ACCOUNTS | tr ',' ' '); do
+                          echo "Running log archive checks for account: $account"
+                          mkdir -p "/tmp/sraverify-results/${account}-logarchive"
+                          cd "/tmp/sraverify-results/${account}-logarchive"
+                          sraverify \
+                              --role arn:$AWS_PARTITION:iam::${account}:role/SRAMemberRole \
+                              --account-type log-archive \
+                              --regions ${INCLUDE_REGIONS} \
+                              --audit-account ${AWS_AUDIT_ACCOUNTS} \
+                              --log-archive-account ${AWS_LOG_ARCHIVE_ACCOUNTS} || echo "log-archive checks for ${account} returned non-zero; continuing"
+                      done
+                  fi
+
+                  # Create scan_account function for per-account checks
+                  scan_account() {
+                      local accountId=$1
+                      local timestamp=$2
+                      echo "Starting scan for account $accountId (mode: $SCAN_MODE)"
+
+                      # Create temporary directory for this account's scan
+                      mkdir -p "/tmp/sraverify-results/${accountId}"
+                      cd "/tmp/sraverify-results/${accountId}"
+
+                      if [ "$SCAN_MODE" = "AllWithInsufficientData" ]; then
+                          account_type_arg="all"
+                          org_flag="--no-org-access"
+                      else
+                          account_type_arg="application"
+                          org_flag=""
+                      fi
+
+                      sraverify \
+                          --role arn:$AWS_PARTITION:iam::${accountId}:role/SRAMemberRole \
+                          --account-type ${account_type_arg} \
+                          ${org_flag} \
+                          --regions ${INCLUDE_REGIONS} \
+                          --audit-account ${AWS_AUDIT_ACCOUNTS} \
+                          --log-archive-account ${AWS_LOG_ARCHIVE_ACCOUNTS} || echo "checks for ${accountId} returned non-zero; continuing"
+                  }
+                  export -f scan_account
+
+                  # Run account-level scans in parallel across the target accounts
+                  echo "Running per-account checks across target accounts in parallel..."
+                  echo $account_list | tr ' ' '\n' | parallel -j ${PARALLEL_ACCOUNTS:-5} scan_account {} $timestamp
+
+                  echo "Consolidating CSV files..."
+                  mkdir -p /tmp/sraverify-consolidated/csv
+                  mkdir -p /tmp/sraverify-consolidated/raw
+
+                  # Copy all raw CSV files
+                  find /tmp/sraverify-results -name "sraverify*.csv" -type f -exec cp {} /tmp/sraverify-consolidated/raw/ \;
+
+                  # Run Python consolidation script
+                  python3 - <<'PYTHON_EOF'
+                  import pandas as pd
+                  import glob
+                  import os
+                  import sys
+
+                  try:
+                      # Find all CSV files
+                      csv_files = glob.glob('/tmp/sraverify-results/**/sraverify*.csv', recursive=True)
+
+                      if csv_files:
+                          # Read and combine all CSVs
+                          all_dfs = []
+                          for file in csv_files:
+                              try:
+                                  df = pd.read_csv(file)
+                                  all_dfs.append(df)
+                              except Exception as e:
+                                  print(f"Error reading file {file}: {str(e)}")
+                                  continue
+
+                          if all_dfs:
+                              # Save consolidated findings
+                              combined_df = pd.concat(all_dfs, ignore_index=True)
+                              output_file = f'/tmp/sraverify-consolidated/csv/sraverify-consolidated-{os.environ["timestamp"]}.csv'
+                              combined_df.to_csv(output_file, index=False)
+
+                  except Exception as e:
+                      print(f"Error in Python script: {str(e)}")
+                      import traceback
+                      traceback.print_exc()
+                      sys.exit(1)
+                  PYTHON_EOF
+
+            post_build:
+              commands:
+                - echo "Uploading SRAVerify results to S3..."
+                - aws s3 cp /tmp/sraverify-consolidated/csv/ s3://$S3_SRA_RESULTS_BUCKET/sraverify/reports/consolidated/ --recursive
+                - aws s3 cp /tmp/sraverify-consolidated/raw/ s3://$S3_SRA_RESULTS_BUCKET/sraverify/reports/raw/ --recursive
+                - echo "Copying dashboard to S3..."
+                - aws s3 cp $CODEBUILD_SRC_DIR/sra-verify-src/sra-verify-dashboard.html s3://$S3_SRA_RESULTS_BUCKET/sraverify/reports/consolidated/sra-verify-dashboard.html
+
+          artifacts:
+            files:
+              - '**/*.csv'
+            base-directory: '/tmp/sraverify-consolidated'
+
+          cache:
+            paths:
+              - '/root/.cache/pip/**/*'
+
+  # Custom resource to start the CodeBuild job after the CloudFormation template is deployed.
+  CodeBuildStartBuild:
+    Type: Custom::CodeBuildStartBuild
+    Properties:
+      ServiceToken: !GetAtt CodeBuildStartBuildLambda.Arn
+      ProjectName: !Ref SRAVerifyCodeBuildProject
+
+  CodeBuildStartBuildLambdaRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Sub ${AWS::AccountId}
+      Path: /
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: StartBuildInline
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'codebuild:StartBuild'
+                Resource: !GetAtt SRAVerifyCodeBuildProject.Arn
+
+  CodeBuildStartBuildLogsGroup:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W84
+            reason: CloudWatch Logs protects data at rest using encryption. All log groups are encrypted. By default, the CloudWatch Logs service manages the server-side encryption keys.
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${CodeBuildStartBuildLambda}'
+      RetentionInDays: 7
+
+  CodeBuildStartBuildLambda:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W58
+            reason: The CodeBuildStartBuildLambdaRole gives Lambda access to write CloudWatch logs.
+          - id: W89
+            reason: Lambda is not deployed inside of a VPC. The Lambda function is used to start the CodeBuild job as a custom CloudFormation resource.
+          - id: W92
+            reason: Reserved concurrent executions is not set.
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.lambda_handler
+      Role: !Sub ${CodeBuildStartBuildLambdaRole.Arn}
+      Timeout: 120
+      Runtime: python3.13
+      Code:
+        ZipFile: |
+          import os
+          import boto3
+          from botocore.exceptions import ClientError
+          import cfnresponse
+
+          def startBuild(event, context):
+            responseData = {}
+            cb = boto3.client('codebuild')
+            try:
+              print("Starting build...")
+              response = cb.start_build(projectName=event['ResourceProperties']['ProjectName'])
+              responseData['buildID'] = response['build']['id']
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+            except ClientError as e:
+              print("Failed to start build")
+              print(e)
+              cfnresponse.send(event, context, cfnresponse.FAILED, e.response)
+
+          def no_op(event, context):
+            responseData = {}
+            cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+
+          def lambda_handler(event,context):
+            print(event)
+            if event['RequestType'] == 'Create':
+              startBuild(event, context)
+            else:
+              no_op(event,context)

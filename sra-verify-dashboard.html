@@ -165,6 +165,10 @@
             color: #dc3545;
         }
 
+        .insufficient {
+            color: #6c757d;
+        }
+
         .high {
             color: #dc3545;
         }
@@ -427,6 +431,16 @@
         .status-fail {
             background: #f8d7da;
             color: #721c24;
+        }
+
+        .status-insufficient_data {
+            background: #e2e3e5;
+            color: #383d41;
+        }
+
+        .status-error {
+            background: #fff3cd;
+            color: #856404;
         }
 
         .severity-badge {
@@ -771,6 +785,10 @@
                             <div class="stat-label">Failed</div>
                         </div>
                         <div class="stat-card">
+                            <div class="stat-number insufficient" id="insufficientCount">-</div>
+                            <div class="stat-label">Insufficient Data</div>
+                        </div>
+                        <div class="stat-card">
                             <div class="stat-number high" id="highSeverity">-</div>
                             <div class="stat-label">High Severity</div>
                         </div>
@@ -811,6 +829,7 @@
                                 <option value="">All Statuses</option>
                                 <option value="PASS">Pass</option>
                                 <option value="FAIL">Fail</option>
+                                <option value="INSUFFICIENT_DATA">Insufficient Data</option>
                             </select>
 
                             <label for="mindmapSeverityFilter">Severity:</label>
@@ -899,6 +918,7 @@
                                     <option value="">All Statuses</option>
                                     <option value="PASS">Pass</option>
                                     <option value="FAIL">Fail</option>
+                                <option value="INSUFFICIENT_DATA">Insufficient Data</option>
                                 </select>
 
                                 <label for="severityFilter">Severity:</label>
@@ -991,6 +1011,7 @@
                             <option value="">All Statuses</option>
                             <option value="PASS">Pass</option>
                             <option value="FAIL">Fail</option>
+                                <option value="INSUFFICIENT_DATA">Insufficient Data</option>
                         </select>
 
                         <label for="fullscreenSeverityFilter">Severity:</label>
@@ -1207,6 +1228,7 @@
                 const total = filteredData.length;
                 const passed = filteredData.filter(row => row.Status === 'PASS').length;
                 const failed = filteredData.filter(row => row.Status === 'FAIL').length;
+                const insufficient = filteredData.filter(row => row.Status === 'INSUFFICIENT_DATA').length;
                 const high = filteredData.filter(row => row.Severity === 'HIGH' && row.Status === 'FAIL').length;
                 const medium = filteredData.filter(row => row.Severity === 'MEDIUM' && row.Status === 'FAIL').length;
                 const low = filteredData.filter(row => row.Severity === 'LOW' && row.Status === 'FAIL').length;
@@ -1214,6 +1236,8 @@
                 document.getElementById('totalChecks').textContent = total;
                 document.getElementById('passCount').textContent = passed;
                 document.getElementById('failCount').textContent = failed;
+                const insufficientEl = document.getElementById('insufficientCount');
+                if (insufficientEl) insufficientEl.textContent = insufficient;
                 document.getElementById('highSeverity').textContent = high;
                 document.getElementById('mediumSeverity').textContent = medium;
                 document.getElementById('lowSeverity').textContent = low;

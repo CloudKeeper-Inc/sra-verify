@@ -12,6 +12,7 @@ from boto3 import Session
 from typing import Dict, List, Any, Optional
 
 from sraverify.core.session import get_session
+from sraverify.core.check import SecurityCheck, INSUFFICIENT_DATA
 from sraverify.core.logging import logger, configure_logging
 from sraverify.utils.outputs import write_csv_output
 from sraverify.utils.progress import ScanProgress
@@ -117,7 +118,8 @@ class SRAVerify:
     def run_checks(self, account_type: str = 'all', service: Optional[str] = None,
                   check_id: Optional[str] = None, audit_accounts: Optional[List[str]] = None,
                   log_archive_accounts: Optional[List[str]] = None,
-                  show_progress: bool = False) -> List[Dict[str, Any]]:
+                  show_progress: bool = False,
+                  org_access: Optional[bool] = None) -> List[Dict[str, Any]]:
         """
         Run security checks.
 
@@ -128,10 +130,20 @@ class SRAVerify:
             audit_accounts: List of AWS accounts used for Audit/Security Tooling
             log_archive_accounts: List of AWS accounts used for Logging
             show_progress: Whether to show progress bar
+            org_access: Whether AWS Organizations / delegated-admin access is available.
+                True/False forces the mode; None auto-detects via a lightweight probe.
+                When access is unavailable, org-dependent checks report INSUFFICIENT_DATA
+                instead of executing.
 
         Returns:
             List of findings
         """
+        # Resolve Organizations/delegated-admin access mode. Honors an explicit
+        # override (org_access) or auto-detects once and caches the result.
+        if org_access is not None:
+            SecurityCheck.set_org_access(org_access)
+        org_access_available = SecurityCheck.detect_org_access(self.session)
+        logger.debug(f"Organizations access available: {org_access_available}")
         # Start with all checks or filtered by account type
         if account_type == 'all':
             checks_to_run = ALL_CHECKS.copy()
@@ -208,8 +220,15 @@ class SRAVerify:
                     check._log_archive_accounts = log_archive_accounts
 
                 try:
-                    logger.debug(f"Executing check {check_id}: {check.check_name}")
-                    findings = check.execute()
+                    if check.requires_org_access and not org_access_available:
+                        logger.debug(
+                            f"Check {check_id} requires Organizations/delegated-admin "
+                            "access which is unavailable; reporting INSUFFICIENT_DATA"
+                        )
+                        findings = check.build_insufficient_data_findings()
+                    else:
+                        logger.debug(f"Executing check {check_id}: {check.check_name}")
+                        findings = check.execute()
                     all_findings.extend(findings)
                     logger.debug(f"Check {check_id} completed with {len(findings)} findings")
                 except Exception as e:
@@ -263,6 +282,14 @@ def parse_args():
     parser.add_argument('--list-checks', action='store_true', help='List available checks')
     parser.add_argument('--list-services', action='store_true', help='List available services')
     parser.add_argument('--debug', action='store_true', help='Enable debug logging')
+
+    org_group = parser.add_mutually_exclusive_group()
+    org_group.add_argument('--no-org-access', dest='org_access', action='store_false', default=None,
+                           help='Assume no AWS Organizations / delegated-admin access. '
+                                'Org-dependent checks report INSUFFICIENT_DATA instead of running.')
+    org_group.add_argument('--assume-org-access', dest='org_access', action='store_true', default=None,
+                           help='Assume AWS Organizations / delegated-admin access is available '
+                                '(skips auto-detection probe).')
 
     return parser.parse_args()
 
@@ -326,7 +353,8 @@ def main():
         check_id=args.check,
         audit_accounts=audit_accounts,
         log_archive_accounts=log_archive_accounts,
-        show_progress=True
+        show_progress=True,
+        org_access=args.org_access
     )
 
     # Write output
@@ -337,6 +365,7 @@ def main():
     pass_count = sum(1 for f in findings if f.get('Status') == 'PASS')
     fail_count = sum(1 for f in findings if f.get('Status') == 'FAIL')
     error_count = sum(1 for f in findings if f.get('Status') == 'ERROR')
+    insufficient_count = sum(1 for f in findings if f.get('Status') == INSUFFICIENT_DATA)
 
     logger.debug("Scan complete")
     print("\n-> Scan complete!")
@@ -344,6 +373,7 @@ def main():
     print(f"  · Pass: {pass_count}")
     print(f"  · Fail: {fail_count}")
     print(f"  · Error: {error_count}")
+    print(f"  · Insufficient Data: {insufficient_count}")
     print(f"  · Output: {output_file}")
 
 
